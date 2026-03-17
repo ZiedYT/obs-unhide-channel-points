@@ -2,15 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ZiedYT OBS Controller - Fixed Load</title>
-    <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@5.0.5/dist/obs-websocket.js"></script>
+    <title>ZiedYT Smart Controller - Stackable</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; }
         .card { background: #18181b; border-radius: 12px; padding: 20px; max-width: 500px; margin: auto; border: 1px solid #303032; }
-        input, button { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
+        input, button, select { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
+        .check-row { display: flex; align-items: center; gap: 10px; font-size: 0.85em; margin: 5px 0; cursor: pointer; }
+        .check-row input { width: auto; margin: 0; cursor: pointer; }
         #tokenBtn { background: #3a3a3a; color: #bf94ff; border: 1px solid #9147ff; cursor: pointer; }
         #startBtn { background: #9147ff; font-weight: bold; border: none; cursor: pointer; }
-        #console-log { background: #000; color: #00ff41; font-family: monospace; font-size: 11px; height: 250px; overflow-y: auto; padding: 10px; margin-top: 15px; border-radius: 4px; white-space: pre-wrap; border: 1px solid #444; }
+        #console-log { background: #000; color: #00ff41; font-family: monospace; font-size: 11px; height: 180px; overflow-y: auto; padding: 10px; margin-top: 15px; border-radius: 4px; white-space: pre-wrap; border: 1px solid #444; }
         .status { font-size: 0.85em; margin-bottom: 5px; font-weight: bold; }
         .success { color: #00ff7f; }
         .error { color: #ff4f4f; }
@@ -20,33 +21,41 @@
 <body>
 
 <div class="card">
-    <h3 style="margin:0 0 10px 0; color:#9147ff;">ZiedYT Controller</h3>
-    
+    <h3 style="margin:0 0 10px 0; color:#9147ff;"></h3>
     <div id="setup-area">
         <button id="tokenBtn">1. Get Twitch Token</button>
         <input type="password" id="twitchToken" placeholder="2. Paste Token Here">
         <input type="password" id="obsPass" placeholder="OBS WebSocket Password">
-        <input type="text" id="sceneName" placeholder="OBS Scene Name">
+        <input type="text" id="sceneName" placeholder="OBS Scene Name (Optional)">
         <input type="text" id="sourceName" placeholder="OBS Source Name">
+        <input type="text" id="rewardId" placeholder="Twitch Reward ID (Optional)">
         <input type="number" id="duration" value="5">
+        
+        <div class="check-row">
+            <input type="checkbox" id="showThenHide">
+            <label for="showThenHide">Show then Hide (Checked) | Hide then Show (Unchecked)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" id="stackTimer">
+            <label for="stackTimer">Stack Duration? (Add time for every trigger)</label>
+        </div>
+        
         <button id="startBtn">3. Start Connection</button>
     </div>
 
     <div id="active-area" class="hidden">
         <div id="obsStat" class="status">OBS: Waiting...</div>
         <div id="twStat" class="status">Twitch: Waiting...</div>
-        <div id="timer-box" style="font-size: 2em; text-align: center; margin: 10px; color: #9147ff;">0s</div>
+        <div id="timer-box" style="font-size: 2.5em; text-align: center; margin: 10px; color: #9147ff; font-weight: bold;">0s</div>
         <button id="testBtn">Manual Test</button>
-        <button onclick="localStorage.clear(); location.reload();" style="background:none; border:none; color: #666; font-size: 10px;">Clear Cache & Reset</button>
+        <button onclick="localStorage.clear(); location.reload();" style="background:none; border:none; color: #666; font-size: 10px; cursor:pointer;">Reset Settings</button>
     </div>
-
     <div id="console-log">-- System Initialized --\n</div>
 </div>
 
 <script>
     const CLIENT_ID = 'o8psoh7xmn5zflmbj5g41vb7o3w8kb';
-    const SCOPES = "channel:read:redemptions%20channel:manage:redemptions%20moderator:read:chat_messages%20moderator:manage:banned_users%20channel:moderate%20channel:read:vips%20moderation:read%20chat:read%20chat:edit";
-
+    const SCOPES = "channel:read:redemptions%20moderation:read";
     const getEl = (id) => document.getElementById(id);
     const log = (msg, isErr = false) => {
         const box = getEl('console-log');
@@ -54,120 +63,162 @@
         box.scrollTop = box.scrollHeight;
     };
 
-    // --- TOKEN REDIRECT ---
+    async function sha256(message) {
+        const msgBuffer = new TextEncoder().encode(message);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        return btoa(String.fromCharCode.apply(null, new Uint8Array(hashBuffer)));
+    }
+
     getEl('tokenBtn').onclick = () => {
         window.open(`https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${CLIENT_ID}&redirect_uri=https://twitchapps.com/tokengen/&scope=${SCOPES}`, '_blank');
     };
 
-    // --- PERSISTENCE ---
-    const fields = ['twitchToken', 'obsPass', 'sceneName', 'sourceName', 'duration'];
+    // Load/Save Persistence
+    const fields = ['twitchToken', 'obsPass', 'sceneName', 'sourceName', 'duration', 'rewardId'];
+    const checks = ['showThenHide', 'stackTimer'];
+    
     fields.forEach(f => {
         const val = localStorage.getItem(f);
         if (val !== null) getEl(f).value = val;
     });
+    checks.forEach(c => {
+        getEl(c).checked = localStorage.getItem(c) === 'true';
+    });
 
     getEl('startBtn').onclick = async () => {
         fields.forEach(f => localStorage.setItem(f, getEl(f).value));
-        
-        // CHECK FOR LIBRARY LOAD BEFORE CONTINUING
-        if (typeof OBSWebSocket === 'undefined') {
-            log("Library not ready yet. Please wait 2 seconds and try again.", true);
-            return;
-        }
-
+        checks.forEach(c => localStorage.setItem(c, getEl(c).checked));
         getEl('setup-area').classList.add('hidden');
         getEl('active-area').classList.remove('hidden');
-        
-        try {
-            await initSystem();
-        } catch (err) {
-            log("Critical Error: " + err.message, true);
-        }
+        initSystem();
     };
 
-    let obs, timeLeft = 0, timerActive = false;
+    let obsWs, timeLeft = 0, timerInterval = null;
 
     async function initSystem() {
-        const token = getEl('twitchToken').value;
-        const pass = getEl('obsPass').value;
+        const twitchToken = getEl('twitchToken').value;
+        const obsPassword = getEl('obsPass').value;
 
-        log("Connecting to OBS...");
-        obs = new OBSWebSocket();
+        obsWs = new WebSocket('ws://127.0.0.1:4455');
         
-        try {
-            await obs.connect('ws://127.0.0.1:4455', pass);
-            getEl('obsStat').innerText = "OBS: Connected";
-            getEl('obsStat').className = "status success";
-            log("OBS Connected.");
-        } catch (e) {
-            log("OBS Connection Failed! Port 4455/Password?", true);
-        }
-
-        log("Checking Twitch Token...");
-        const userRes = await fetch('https://api.twitch.tv/helix/users?login=ZiedYT', {
-            headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': CLIENT_ID }
-        });
-        
-        const userData = await userRes.json();
-        if (!userData.data) {
-            log("Twitch Error: " + (userData.message || "Invalid Token"), true);
-            return;
-        }
-
-        const userId = userData.data[0].id;
-        log(`Listening to ZiedYT (${userId})...`);
-
-        const socket = new WebSocket('wss://pubsub-edge.twitch.tv');
-        socket.onopen = () => {
-            getEl('twStat').innerText = "Twitch: Connected";
-            getEl('twStat').className = "status success";
-            socket.send(JSON.stringify({
-                type: 'LISTEN',
-                data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: token }
-            }));
-            log("Listening for Redemptions/Bans!");
+        obsWs.onmessage = async (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.op === 0) {
+                const { salt, challenge } = msg.d.authentication;
+                const secret = await sha256(obsPassword + salt);
+                const auth = await sha256(secret + challenge);
+                obsWs.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, authentication: auth, eventSubscriptions: 1023 } }));
+            }
+            if (msg.op === 2) {
+                getEl('obsStat').innerText = "OBS: Connected";
+                getEl('obsStat').className = "status success";
+                log("OBS Connected.");
+            }
         };
 
-        socket.onmessage = (e) => {
+        const userRes = await fetch('https://api.twitch.tv/helix/users?login=ZiedYT', {
+            headers: { 'Authorization': `Bearer ${twitchToken}`, 'Client-Id': CLIENT_ID }
+        });
+        const userData = await userRes.json();
+        const userId = userData.data[0].id;
+
+        const twSocket = new WebSocket('wss://pubsub-edge.twitch.tv');
+        twSocket.onopen = () => {
+            getEl('twStat').innerText = "Twitch: Connected";
+            getEl('twStat').className = "status success";
+            twSocket.send(JSON.stringify({
+                type: 'LISTEN',
+                data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: twitchToken }
+            }));
+            log("Monitoring Twitch Events...");
+        };
+
+        twSocket.onmessage = (e) => {
             const msg = JSON.parse(e.data);
             if (msg.type === 'MESSAGE') {
                 const inner = JSON.parse(msg.data.message);
-                if (inner.data?.redemption || inner.data?.moderation_action) {
-                    log(`Trigger detected!`);
-                    triggerEffect();
+                const topic = msg.data.topic;
+                if (topic.includes('channel-points')) {
+                    const rId = getEl('rewardId').value;
+                    if (!rId || inner.data.redemption.reward.id === rId) triggerEffect();
+                } else if (topic.includes('chat_moderator_actions')) {
+                    if (inner.data.moderation_action === 'timeout' && inner.data.created_by_user_id === userId) triggerEffect();
                 }
             }
         };
-
-        setInterval(() => { if(socket.readyState === 1) socket.send(JSON.stringify({type:'PING'})); }, 240000);
+        setInterval(() => { if(twSocket.readyState === 1) twSocket.send(JSON.stringify({type:'PING'})); }, 240000);
     }
 
-    async function triggerEffect() {
-        const dur = parseInt(getEl('duration').value);
-        timeLeft = dur; // Reset/Set time
-        getEl('timer-box').innerText = timeLeft + "s";
+    function sendRawRequest(type, data, callback) {
+        if (!obsWs || obsWs.readyState !== 1) return;
+        const rId = "req_" + Date.now();
+        const handler = (e) => {
+            const res = JSON.parse(e.data);
+            if (res.op === 7 && res.d.requestId === rId) {
+                obsWs.removeEventListener('message', handler);
+                if (callback) callback(res.d.responseData);
+            }
+        };
+        obsWs.addEventListener('message', handler);
+        obsWs.send(JSON.stringify({ op: 6, d: { requestType: type, requestId: rId, requestData: data } }));
+    }
 
-        const scene = getEl('sceneName').value;
+    function triggerEffect() {
+        let scene = getEl('sceneName').value;
         const source = getEl('sourceName').value;
+        const dur = parseInt(getEl('duration').value);
+        const modeShow = getEl('showThenHide').checked;
+        const isStacking = getEl('stackTimer').checked;
 
-        try {
-            const { sceneItems } = await obs.call('GetSceneItemList', { sceneName: scene });
-            const item = sceneItems.find(i => i.sourceName === source);
-            await obs.call('SetSceneItemEnabled', { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: true });
+        if (!scene) {
+            sendRawRequest("GetCurrentProgramScene", {}, (data) => {
+                runAction(data.currentProgramSceneName, source, dur, modeShow, isStacking);
+            });
+        } else {
+            runAction(scene, source, dur, modeShow, isStacking);
+        }
+    }
 
-            if (!timerActive) {
-                timerActive = true;
-                const interval = setInterval(async () => {
+    function runAction(scene, source, dur, modeShow, isStacking) {
+        sendRawRequest("GetSceneItemList", { sceneName: scene }, (data) => {
+            const item = data.sceneItems.find(i => i.sourceName.toLowerCase() === source.toLowerCase());
+            if (!item) { log(`Source "${source}" not found!`, true); return; }
+
+            // Apply Action
+            sendRawRequest("SetSceneItemEnabled", { 
+                sceneName: scene, sceneItemId: item.sceneItemId, 
+                sceneItemEnabled: modeShow ? true : false 
+            });
+
+            // Handle Timer
+            if (timerInterval) {
+                if (isStacking) {
+                    timeLeft += dur;
+                    log(`Stacked! Added ${dur}s.`);
+                } else {
+                    timeLeft = dur;
+                    log(`Reset! Set to ${dur}s.`);
+                }
+            } else {
+                timeLeft = dur;
+                timerInterval = setInterval(() => {
                     timeLeft--;
-                    getEl('timer-box').innerText = (timeLeft > 0 ? timeLeft : 0) + "s";
+                    getEl('timer-box').innerText = timeLeft + "s";
                     if (timeLeft <= 0) {
-                        clearInterval(interval);
-                        timerActive = false;
-                        await obs.call('SetSceneItemEnabled', { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: false });
+                        clearInterval(timerInterval);
+                        timerInterval = null;
+                        getEl('timer-box').innerText = "0s";
+                        // Revert Action
+                        sendRawRequest("SetSceneItemEnabled", { 
+                            sceneName: scene, sceneItemId: item.sceneItemId, 
+                            sceneItemEnabled: modeShow ? false : true 
+                        });
+                        log("Duration ended.");
                     }
                 }, 1000);
             }
-        } catch (e) { log("Trigger Error: " + e.message, true); }
+            getEl('timer-box').innerText = timeLeft + "s";
+        });
     }
 
     getEl('testBtn').onclick = triggerEffect;
