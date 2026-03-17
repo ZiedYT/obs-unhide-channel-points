@@ -2,42 +2,214 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Twitch OBS Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZiedYT OBS Controller</title>
     <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@5.0.5/dist/obs-websocket.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; line-height: 1.6; }
-        .card { background: #18181b; border-radius: 8px; padding: 20px; max-width: 400px; margin: auto; border: 1px solid #303032; }
-        input, button { width: 100%; padding: 10px; margin: 8px 0; border-radius: 4px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
-        button { background: #9147ff; font-weight: bold; cursor: pointer; border: none; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 10px; display: flex; justify-content: center; }
+        .card { background: #18181b; border-radius: 12px; padding: 20px; width: 100%; max-width: 450px; border: 1px solid #303032; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h3 { margin-top: 0; color: #9147ff; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        input, button { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
+        button { background: #9147ff; font-weight: bold; cursor: pointer; border: none; transition: 0.2s; }
         button:hover { background: #772ce8; }
-        .status { font-size: 0.8em; margin-top: 10px; padding: 5px; border-radius: 4px; }
-        .connected { color: #00ff7f; }
-        .disconnected { color: #ff4f4f; }
-        #timer-box { font-size: 2em; text-align: center; margin: 20px 0; color: #9147ff; font-weight: bold; }
+        #console-log { 
+            background: #000; color: #00ff41; font-family: 'Consolas', monospace; font-size: 12px; 
+            height: 180px; overflow-y: auto; padding: 10px; border: 1px solid #333; margin-top: 15px; border-radius: 4px; white-space: pre-wrap;
+        }
+        .status-box { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .status { font-size: 0.85em; padding: 4px 8px; border-radius: 4px; background: #222; }
+        .success { color: #00ff7f; border: 1px solid #00ff7f; }
+        .err { color: #ff4f4f; border: 1px solid #ff4f4f; }
+        .timer-big { font-size: 2.5em; text-align: center; color: #9147ff; font-weight: bold; margin: 10px 0; }
         .hidden { display: none; }
+        label { font-size: 0.9em; cursor: pointer; display: block; margin: 10px 0; }
     </style>
 </head>
 <body>
+
     <div class="card">
+        <h3>OBS Controller</h3>
+
         <div id="setup-ui">
-            <h3>OBS & Twitch Setup</h3>
             <input type="password" id="obsPass" placeholder="OBS WebSocket Password">
-            <input type="text" id="sceneName" placeholder="Scene Name (e.g. Gameplay)">
+            <input type="text" id="sceneName" placeholder="Scene Name (e.g. Gaming)">
             <input type="text" id="sourceName" placeholder="Source Name (e.g. MemePic)">
-            <input type="text" id="rewardId" placeholder="Reward ID (optional)">
-            <input type="number" id="duration" value="5" placeholder="Duration (seconds)">
-            <label style="font-size: 0.8em;"><input type="checkbox" id="stackTime"> Stack Duration?</label>
-            <button id="authBtn">Connect to Twitch</button>
+            <input type="text" id="rewardId" placeholder="Reward ID (Leave blank to find in logs)">
+            <input type="number" id="duration" value="5" title="Seconds">
+            <label><input type="checkbox" id="stackTime"> Stack Duration? (7s + 5s = 12s)</label>
+            <button id="authBtn">Connect Twitch Account</button>
         </div>
 
         <div id="active-ui" class="hidden">
-            <div id="timer-box">0s</div>
-            <div id="obsStatus" class="status disconnected">OBS: Offline</div>
-            <div id="twitchStatus" class="status disconnected">Twitch: Offline</div>
-            <button id="testBtn" style="background: #3a3a3a;">Manual Test Trigger</button>
-            <button onclick="localStorage.clear(); location.reload();" style="background: transparent; color: #666; font-size: 0.7em;">Reset All Settings</button>
+            <div class="status-box">
+                <div id="obsStatus" class="status err">OBS: OFF</div>
+                <div id="twitchStatus" class="status err">TWITCH: OFF</div>
+            </div>
+            <div id="timer-box" class="timer-big">0s</div>
+            <button id="testBtn">Manual Test Trigger</button>
+            <button onclick="localStorage.clear(); location.reload();" style="background:none; color:#666; font-size:11px;">Clear Saved Settings</button>
         </div>
+
+        <div id="console-log">-- System Initialized --\n</div>
     </div>
-    <script src="script.js"></script>
+
+    <script>
+        // --- GLOBAL VARIABLES ---
+        let obs;
+        const CLIENT_ID = 'o8psoh7xmn5zflmbj5g41vb7o3w8kb'; 
+        const REDIRECT_URI = window.location.origin + window.location.pathname;
+        let timeLeft = 0;
+        let timerActive = false;
+
+        // --- UTILS ---
+        const log = (msg, isError = false) => {
+            const box = document.getElementById('console-log');
+            box.innerText += `[${new Date().toLocaleTimeString()}] ${isError ? '❌' : 'ℹ️'} ${msg}\n`;
+            box.scrollTop = box.scrollHeight;
+        };
+
+        const getEl = (id) => document.getElementById(id);
+        const fields = ['obsPass', 'sceneName', 'sourceName', 'rewardId', 'duration', 'stackTime'];
+
+        // --- STORAGE ---
+        function saveFields() {
+            fields.forEach(id => {
+                const el = getEl(id);
+                localStorage.setItem(id, el.type === 'checkbox' ? el.checked : el.value);
+            });
+        }
+
+        function loadFields() {
+            fields.forEach(id => {
+                const val = localStorage.getItem(id);
+                if (val !== null) {
+                    const el = getEl(id);
+                    if (el.type === 'checkbox') el.checked = (val === 'true');
+                    else el.value = val;
+                }
+            });
+        }
+
+        // --- TWITCH AUTH ---
+        getEl('authBtn').onclick = () => {
+            saveFields();
+            const scopes = encodeURIComponent('channel:read:redemptions moderation:read');
+            window.location.href = `https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=${scopes}`;
+        };
+
+        // --- CORE LOGIC ---
+        window.addEventListener('load', () => {
+            loadFields();
+            const hash = new URLSearchParams(window.location.hash.replace('#', '?'));
+            const token = hash.get('access_token');
+
+            if (token) {
+                getEl('setup-ui').classList.add('hidden');
+                getEl('active-ui').classList.remove('hidden');
+                window.history.replaceState(null, null, window.location.pathname);
+                initSystem(token);
+            } else {
+                log("Setup: Enter details and click Connect.");
+            }
+        });
+
+        async function initSystem(token) {
+            // 1. Initialize OBS
+            if (typeof OBSWebSocket === 'undefined') {
+                log("CRITICAL: OBS Library failed to load from CDN!", true);
+                return;
+            }
+            obs = new OBSWebSocket();
+
+            try {
+                await obs.connect('ws://127.0.0.1:4455', getEl('obsPass').value);
+                getEl('obsStatus').innerText = "OBS: CONNECTED";
+                getEl('obsStatus').className = "status success";
+                log("OBS WebSocket Connected.");
+            } catch (e) {
+                log("OBS Connection Failed! Check password & Port 4455.", true);
+            }
+
+            // 2. Connect Twitch (ZiedYT)
+            try {
+                const userRes = await fetch('https://api.twitch.tv/helix/users?login=ZiedYT', {
+                    headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': CLIENT_ID }
+                });
+                const userData = await userRes.json();
+                const userId = userData.data[0].id;
+                log(`Monitoring Twitch Channel: ZiedYT (${userId})`);
+
+                const socket = new WebSocket('wss://pubsub-edge.twitch.tv');
+                socket.onopen = () => {
+                    getEl('twitchStatus').innerText = "TWITCH: CONNECTED";
+                    getEl('twitchStatus').className = "status success";
+                    socket.send(JSON.stringify({
+                        type: 'LISTEN',
+                        data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: token }
+                    }));
+                    log("Listening for Redemptions and Mod Actions...");
+                };
+
+                socket.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'PONG') return;
+                    if (msg.type === 'MESSAGE') {
+                        const inner = JSON.parse(msg.data.message);
+                        
+                        // Handle Reward
+                        if (inner.data?.redemption) {
+                            const rID = inner.data.redemption.reward.id;
+                            log(`REDEEM: ${inner.data.redemption.reward.title} (ID: ${rID})`);
+                            if (rID === getEl('rewardId').value || getEl('rewardId').value === "") triggerEffect();
+                        }
+
+                        // Handle Mod Actions
+                        if (inner.data?.moderation_action === 'timeout' || inner.data?.moderation_action === 'ban') {
+                            log(`MOD ACTION: ${inner.data.moderation_action} on ${inner.data.target_user_login}`);
+                            triggerEffect();
+                        }
+                    }
+                };
+                setInterval(() => socket.send(JSON.stringify({ type: 'PING' })), 240000);
+
+            } catch (e) { log(`Twitch Error: ${e.message}`, true); }
+        }
+
+        async function triggerEffect() {
+            const scene = getEl('sceneName').value;
+            const source = getEl('sourceName').value;
+            const dur = parseInt(getEl('duration').value);
+
+            if (getEl('stackTime').checked) timeLeft += dur;
+            else timeLeft = dur;
+
+            getEl('timer-box').innerText = `${timeLeft}s`;
+
+            try {
+                const { sceneItems } = await obs.call('GetSceneItemList', { sceneName: scene });
+                const item = sceneItems.find(i => i.sourceName === source);
+                if (!item) throw new Error(`Source "${source}" not found in scene "${scene}"`);
+
+                await obs.call('SetSceneItemEnabled', { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: true });
+
+                if (!timerActive) {
+                    timerActive = true;
+                    const interval = setInterval(async () => {
+                        timeLeft--;
+                        getEl('timer-box').innerText = `${timeLeft}s`;
+                        
+                        if (timeLeft <= 0) {
+                            clearInterval(interval);
+                            timerActive = false;
+                            await obs.call('SetSceneItemEnabled', { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: false });
+                            log("Effect Expired. Source Hidden.");
+                        }
+                    }, 1000);
+                }
+            } catch (e) { log(`OBS Action Error: ${e.message}`, true); }
+        }
+
+        getEl('testBtn').onclick = triggerEffect;
+    </script>
 </body>
 </html>
