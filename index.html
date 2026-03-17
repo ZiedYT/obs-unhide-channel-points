@@ -4,8 +4,15 @@
     <meta charset="UTF-8">
     <title>OBS reward listen</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; margin: 0; overflow: hidden; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; margin: 0; overflow: hidden; user-select: none; }
         
+        /* The Invisible Shield - Click this to reveal debug */
+        #secret-click-zone {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 5; /* Sits behind the card but covers the background */
+            cursor: default;
+        }
+
         /* Floating Timer (Top Left) */
         #floating-overlay { 
             position: fixed; top: 10px; left: 10px; 
@@ -30,13 +37,14 @@
         .error { color: #ff4f4f; }
         .hidden { display: none !important; }
 
-        /* Secret Progress Bar (Optional visual hint when holding space) */
-        #secret-progress { position: fixed; bottom: 0; left: 0; height: 4px; background: #9147ff; width: 0%; transition: width 0.1s linear; }
+        /* Progress hint at the bottom */
+        #secret-progress { position: fixed; bottom: 0; left: 0; height: 6px; background: #9147ff; width: 0%; z-index: 100; transition: width 0.1s linear; }
     </style>
 </head>
 <body>
 
 <div id="secret-progress"></div>
+<div id="secret-click-zone"></div>
 
 <div id="floating-overlay" class="hidden">
     <img src="peepo.png" alt="peepo">
@@ -65,7 +73,7 @@
         </div>
         <div class="check-row">
             <input type="checkbox" id="showDebug" checked>
-            <label for="showDebug">Show Debug Page (Hold SPACE 5s to reveal if hidden)</label>
+            <label for="showDebug">Show Debug Page (Hold CLICK 5s to reveal)</label>
         </div>
         
         <button id="startBtn">3. Start Connection</button>
@@ -94,35 +102,33 @@
         }
     };
 
-    // --- SECRET SPACEBAR LOGIC ---
-    let spaceTimer;
-    let isHolding = false;
+    // --- SECRET CLICK LOGIC ---
+    let holdTimer;
+    const clickZone = getEl('secret-click-zone');
+    const progress = getEl('secret-progress');
 
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && !isHolding) {
-            isHolding = true;
-            let start = Date.now();
-            getEl('secret-progress').style.width = '100%';
-            getEl('secret-progress').style.transition = 'width 5s linear';
-            
-            spaceTimer = setTimeout(() => {
-                log("Secret Debug Mode Enabled!");
-                getEl('main-card').classList.remove('hidden');
-                getEl('active-area').classList.remove('hidden');
-                getEl('showDebug').checked = true;
-                localStorage.setItem('showDebug', 'true');
-            }, 5000);
-        }
-    });
+    const startHold = () => {
+        progress.style.transition = 'width 5s linear';
+        progress.style.width = '100%';
+        holdTimer = setTimeout(() => {
+            getEl('main-card').classList.remove('hidden');
+            getEl('active-area').classList.remove('hidden');
+            getEl('showDebug').checked = true;
+            localStorage.setItem('showDebug', 'true');
+            log("Debug revealed via hold-click!");
+        }, 5000);
+    };
 
-    window.addEventListener('keyup', (e) => {
-        if (e.code === 'Space') {
-            isHolding = false;
-            clearTimeout(spaceTimer);
-            getEl('secret-progress').style.transition = 'none';
-            getEl('secret-progress').style.width = '0%';
-        }
-    });
+    const stopHold = () => {
+        clearTimeout(holdTimer);
+        progress.style.transition = 'none';
+        progress.style.width = '0%';
+    };
+
+    // Listen on the whole document for the hold
+    document.addEventListener('mousedown', startHold);
+    document.addEventListener('mouseup', stopHold);
+    document.addEventListener('mouseleave', stopHold);
 
     async function sha256(message) {
         const msgBuffer = new TextEncoder().encode(message);
@@ -130,7 +136,8 @@
         return btoa(String.fromCharCode.apply(null, new Uint8Array(hashBuffer)));
     }
 
-    getEl('tokenBtn').onclick = () => {
+    getEl('tokenBtn').onclick = (e) => {
+        e.stopPropagation(); // Prevent trigger hold-click
         window.open(`https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${CLIENT_ID}&redirect_uri=https://twitchapps.com/tokengen/&scope=${SCOPES}`, '_blank');
     };
 
@@ -148,25 +155,25 @@
 
     window.onload = () => {
         if (getEl('twitchToken').value) {
-            log("Auto-connecting...");
             startSystem();
         }
     };
 
-    getEl('startBtn').onclick = () => startSystem();
+    getEl('startBtn').onclick = (e) => {
+        e.stopPropagation();
+        startSystem();
+    };
 
     function startSystem() {
         fields.forEach(f => localStorage.setItem(f, getEl(f).value));
         checks.forEach(c => localStorage.setItem(c, getEl(c).checked));
         
         getEl('setup-area').classList.add('hidden');
-        
         if (getEl('showDebug').checked) {
             getEl('active-area').classList.remove('hidden');
         } else {
             getEl('main-card').classList.add('hidden');
         }
-        
         initSystem();
     }
 
@@ -295,7 +302,10 @@
         getEl('floating-timer').innerText = val + "s";
     }
 
-    getEl('testBtn').onclick = triggerEffect;
+    getEl('testBtn').onclick = (e) => {
+        e.stopPropagation();
+        triggerEffect();
+    };
 </script>
 </body>
 </html>
