@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ZiedYT OBS Controller - Debug Mode</title>
+    <title>ZiedYT OBS Controller - Fixed Load</title>
     <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@5.0.5/dist/obs-websocket.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; }
         .card { background: #18181b; border-radius: 12px; padding: 20px; max-width: 500px; margin: auto; border: 1px solid #303032; }
         input, button { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
-        #tokenBtn { background: #3a3a3a; color: #bf94ff; border: 1px solid #9147ff; }
-        #startBtn { background: #9147ff; font-weight: bold; border: none; }
+        #tokenBtn { background: #3a3a3a; color: #bf94ff; border: 1px solid #9147ff; cursor: pointer; }
+        #startBtn { background: #9147ff; font-weight: bold; border: none; cursor: pointer; }
         #console-log { background: #000; color: #00ff41; font-family: monospace; font-size: 11px; height: 250px; overflow-y: auto; padding: 10px; margin-top: 15px; border-radius: 4px; white-space: pre-wrap; border: 1px solid #444; }
         .status { font-size: 0.85em; margin-bottom: 5px; font-weight: bold; }
         .success { color: #00ff7f; }
@@ -20,26 +20,27 @@
 <body>
 
 <div class="card">
-    <h3 style="margin:0 0 10px 0; color:#9147ff;">ZiedYT Debug Controller</h3>
+    <h3 style="margin:0 0 10px 0; color:#9147ff;">ZiedYT Controller</h3>
     
     <div id="setup-area">
-        <button id="tokenBtn">1. Get Token</button>
+        <button id="tokenBtn">1. Get Twitch Token</button>
         <input type="password" id="twitchToken" placeholder="2. Paste Token Here">
         <input type="password" id="obsPass" placeholder="OBS WebSocket Password">
         <input type="text" id="sceneName" placeholder="OBS Scene Name">
         <input type="text" id="sourceName" placeholder="OBS Source Name">
         <input type="number" id="duration" value="5">
-        <button id="startBtn">3. Start & Debug</button>
+        <button id="startBtn">3. Start Connection</button>
     </div>
 
     <div id="active-area" class="hidden">
         <div id="obsStat" class="status">OBS: Waiting...</div>
         <div id="twStat" class="status">Twitch: Waiting...</div>
+        <div id="timer-box" style="font-size: 2em; text-align: center; margin: 10px; color: #9147ff;">0s</div>
         <button id="testBtn">Manual Test</button>
         <button onclick="localStorage.clear(); location.reload();" style="background:none; border:none; color: #666; font-size: 10px;">Clear Cache & Reset</button>
     </div>
 
-    <div id="console-log">-- Debug Logs --\n</div>
+    <div id="console-log">-- System Initialized --\n</div>
 </div>
 
 <script>
@@ -49,18 +50,8 @@
     const getEl = (id) => document.getElementById(id);
     const log = (msg, isErr = false) => {
         const box = getEl('console-log');
-        box.innerText += `[${new Date().toLocaleTimeString()}] ${isErr ? 'CRASH: ' : ''}${msg}\n`;
+        box.innerText += `[${new Date().toLocaleTimeString()}] ${isErr ? '❌ ' : 'ℹ️ '}${msg}\n`;
         box.scrollTop = box.scrollHeight;
-    };
-
-    // --- CRITICAL: GLOBAL ERROR CATCHER ---
-    window.onerror = function(message, source, lineno, colno, error) {
-        log(`${message} (Line: ${lineno})`, true);
-        return false;
-    };
-
-    window.onunhandledrejection = function(event) {
-        log(`Async Error: ${event.reason}`, true);
     };
 
     // --- TOKEN REDIRECT ---
@@ -68,83 +59,118 @@
         window.open(`https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${CLIENT_ID}&redirect_uri=https://twitchapps.com/tokengen/&scope=${SCOPES}`, '_blank');
     };
 
-    // --- STORAGE ---
+    // --- PERSISTENCE ---
     const fields = ['twitchToken', 'obsPass', 'sceneName', 'sourceName', 'duration'];
     fields.forEach(f => {
         const val = localStorage.getItem(f);
         if (val !== null) getEl(f).value = val;
     });
 
-    getEl('startBtn').onclick = () => {
+    getEl('startBtn').onclick = async () => {
         fields.forEach(f => localStorage.setItem(f, getEl(f).value));
+        
+        // CHECK FOR LIBRARY LOAD BEFORE CONTINUING
+        if (typeof OBSWebSocket === 'undefined') {
+            log("Library not ready yet. Please wait 2 seconds and try again.", true);
+            return;
+        }
+
         getEl('setup-area').classList.add('hidden');
         getEl('active-area').classList.remove('hidden');
-        initSystem().catch(err => log("Init Error: " + err, true));
+        
+        try {
+            await initSystem();
+        } catch (err) {
+            log("Critical Error: " + err.message, true);
+        }
     };
+
+    let obs, timeLeft = 0, timerActive = false;
 
     async function initSystem() {
         const token = getEl('twitchToken').value;
         const pass = getEl('obsPass').value;
 
-        if(!token) { log("Missing Token!", true); return; }
-
-        log("Attempting OBS connection...");
-        const obs = new OBSWebSocket();
+        log("Connecting to OBS...");
+        obs = new OBSWebSocket();
+        
         try {
             await obs.connect('ws://127.0.0.1:4455', pass);
             getEl('obsStat').innerText = "OBS: Connected";
-            getEl('obsStat').className = "success";
-            log("OBS Connected successfully.");
+            getEl('obsStat').className = "status success";
+            log("OBS Connected.");
         } catch (e) {
-            log("OBS Failed. Is WebSocket enabled in OBS? Port 4455?", true);
+            log("OBS Connection Failed! Port 4455/Password?", true);
         }
 
-        log("Fetching ZiedYT Channel ID...");
+        log("Checking Twitch Token...");
         const userRes = await fetch('https://api.twitch.tv/helix/users?login=ZiedYT', {
             headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': CLIENT_ID }
         });
         
         const userData = await userRes.json();
-        if (userData.error) {
-            log(`Twitch API Error: ${userData.message}`, true);
+        if (!userData.data) {
+            log("Twitch Error: " + (userData.message || "Invalid Token"), true);
             return;
         }
 
         const userId = userData.data[0].id;
-        log(`ZiedYT ID: ${userId}. Opening PubSub...`);
+        log(`Listening to ZiedYT (${userId})...`);
 
         const socket = new WebSocket('wss://pubsub-edge.twitch.tv');
-        
         socket.onopen = () => {
             getEl('twStat').innerText = "Twitch: Connected";
-            getEl('twStat').className = "success";
+            getEl('twStat').className = "status success";
             socket.send(JSON.stringify({
                 type: 'LISTEN',
-                data: { 
-                    topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], 
-                    auth_token: token 
-                }
+                data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: token }
             }));
-            log("Twitch Listener Active.");
+            log("Listening for Redemptions/Bans!");
         };
 
-        socket.onerror = (err) => log("WebSocket Error: " + JSON.stringify(err), true);
-        
         socket.onmessage = (e) => {
             const msg = JSON.parse(e.data);
-            if (msg.type === 'RECONNECT') {
-                log("Twitch requested reconnect. Refreshing...", true);
-                setTimeout(() => location.reload(), 2000);
-            }
             if (msg.type === 'MESSAGE') {
-                log("Event received from Twitch!");
-                // (Trigger logic would go here, simplified for debugging)
+                const inner = JSON.parse(msg.data.message);
+                if (inner.data?.redemption || inner.data?.moderation_action) {
+                    log(`Trigger detected!`);
+                    triggerEffect();
+                }
             }
         };
 
-        // Keepalive
         setInterval(() => { if(socket.readyState === 1) socket.send(JSON.stringify({type:'PING'})); }, 240000);
     }
+
+    async function triggerEffect() {
+        const dur = parseInt(getEl('duration').value);
+        timeLeft = dur; // Reset/Set time
+        getEl('timer-box').innerText = timeLeft + "s";
+
+        const scene = getEl('sceneName').value;
+        const source = getEl('sourceName').value;
+
+        try {
+            const { sceneItems } = await obs.call('GetSceneItemList', { sceneName: scene });
+            const item = sceneItems.find(i => i.sourceName === source);
+            await obs.call('SetSceneItemEnabled', { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: true });
+
+            if (!timerActive) {
+                timerActive = true;
+                const interval = setInterval(async () => {
+                    timeLeft--;
+                    getEl('timer-box').innerText = (timeLeft > 0 ? timeLeft : 0) + "s";
+                    if (timeLeft <= 0) {
+                        clearInterval(interval);
+                        timerActive = false;
+                        await obs.call('SetSceneItemEnabled', { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: false });
+                    }
+                }, 1000);
+            }
+        } catch (e) { log("Trigger Error: " + e.message, true); }
+    }
+
+    getEl('testBtn').onclick = triggerEffect;
 </script>
 </body>
 </html>
