@@ -4,19 +4,19 @@
     <meta charset="UTF-8">
     <title>OBS reward listen</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; margin: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; margin: 0; overflow: hidden; }
         
         /* Floating Timer (Top Left) */
         #floating-overlay { 
             position: fixed; top: 10px; left: 10px; 
             display: flex; align-items: center; gap: 10px; 
-            z-index: 9999; pointer-events: none; /* Allows clicks to pass through */
+            z-index: 9999; pointer-events: none; 
         }
         #floating-overlay img { width: 50px; height: 50px; object-fit: contain; }
         #floating-timer { font-size: 32px; font-weight: bold; color: #9147ff; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
 
         /* Main Card */
-        .card { background: #18181b; border-radius: 12px; padding: 20px; max-width: 500px; margin: 50px auto; border: 1px solid #303032; }
+        .card { background: #18181b; border-radius: 12px; padding: 20px; max-width: 500px; margin: 50px auto; border: 1px solid #303032; position: relative; z-index: 10; }
         input, button, select { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
         .check-row { display: flex; align-items: center; gap: 10px; font-size: 0.85em; margin: 5px 0; cursor: pointer; }
         .check-row input { width: auto; margin: 0; cursor: pointer; }
@@ -29,9 +29,14 @@
         .success { color: #00ff7f; }
         .error { color: #ff4f4f; }
         .hidden { display: none !important; }
+
+        /* Secret Progress Bar (Optional visual hint when holding space) */
+        #secret-progress { position: fixed; bottom: 0; left: 0; height: 4px; background: #9147ff; width: 0%; transition: width 0.1s linear; }
     </style>
 </head>
 <body>
+
+<div id="secret-progress"></div>
 
 <div id="floating-overlay" class="hidden">
     <img src="peepo.png" alt="peepo">
@@ -60,7 +65,7 @@
         </div>
         <div class="check-row">
             <input type="checkbox" id="showDebug" checked>
-            <label for="showDebug">Show Debug Page (Logs & Manual Test)</label>
+            <label for="showDebug">Show Debug Page (Hold SPACE 5s to reveal if hidden)</label>
         </div>
         
         <button id="startBtn">3. Start Connection</button>
@@ -88,6 +93,36 @@
             box.scrollTop = box.scrollHeight;
         }
     };
+
+    // --- SECRET SPACEBAR LOGIC ---
+    let spaceTimer;
+    let isHolding = false;
+
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && !isHolding) {
+            isHolding = true;
+            let start = Date.now();
+            getEl('secret-progress').style.width = '100%';
+            getEl('secret-progress').style.transition = 'width 5s linear';
+            
+            spaceTimer = setTimeout(() => {
+                log("Secret Debug Mode Enabled!");
+                getEl('main-card').classList.remove('hidden');
+                getEl('active-area').classList.remove('hidden');
+                getEl('showDebug').checked = true;
+                localStorage.setItem('showDebug', 'true');
+            }, 5000);
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        if (e.code === 'Space') {
+            isHolding = false;
+            clearTimeout(spaceTimer);
+            getEl('secret-progress').style.transition = 'none';
+            getEl('secret-progress').style.width = '0%';
+        }
+    });
 
     async function sha256(message) {
         const msgBuffer = new TextEncoder().encode(message);
@@ -126,11 +161,10 @@
         
         getEl('setup-area').classList.add('hidden');
         
-        // Check if we should show the debug container
         if (getEl('showDebug').checked) {
             getEl('active-area').classList.remove('hidden');
         } else {
-            getEl('main-card').classList.add('hidden'); // Hide the whole card
+            getEl('main-card').classList.add('hidden');
         }
         
         initSystem();
@@ -173,7 +207,6 @@
                 type: 'LISTEN',
                 data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: twitchToken }
             }));
-            log("Twitch Monitoring active.");
         };
 
         twSocket.onmessage = (e) => {
@@ -232,7 +265,6 @@
                 sceneItemEnabled: modeShow ? true : false 
             });
 
-            // Show both timers
             getEl('floating-overlay').classList.remove('hidden');
 
             if (timerInterval) {
@@ -242,11 +274,10 @@
                 timerInterval = setInterval(() => {
                     timeLeft--;
                     updateTimerDisplay(timeLeft);
-                    
                     if (timeLeft <= 0) {
                         clearInterval(timerInterval);
                         timerInterval = null;
-                        getEl('floating-overlay').classList.add('hidden'); // Hide peepo and timer
+                        getEl('floating-overlay').classList.add('hidden');
                         updateTimerDisplay(0);
                         sendRawRequest("SetSceneItemEnabled", { 
                             sceneName: scene, sceneItemId: item.sceneItemId, 
