@@ -6,23 +6,38 @@
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; margin: 0; overflow: hidden; user-select: none; }
         
-        /* The Invisible Shield - Click this to reveal debug */
-        #secret-click-zone {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            z-index: 5; /* Sits behind the card but covers the background */
-            cursor: default;
-        }
-
-        /* Floating Timer (Top Left) */
+        #secret-progress { position: fixed; bottom: 0; left: 0; height: 6px; background: #9147ff; width: 0%; z-index: 100; transition: width 0.1s linear; }
+            
         #floating-overlay { 
-            position: fixed; top: 10px; left: 10px; 
-            display: flex; align-items: center; gap: 10px; 
-            z-index: 9999; pointer-events: none; 
+            position: fixed; 
+            top: 20px; 
+            left: 20px; 
+            display: flex; 
+            flex-direction: row; /* Keep them side-by-side */
+            align-items: center; /* Vertically center image and text */
+            justify-content: flex-start; /* Keep them to the left */
+            gap: 20px; 
+            height: 120px; /* Force a height for the container */
+            min-width: 300px;
+            z-index: 9999; 
+            pointer-events: none; 
         }
-        #floating-overlay img { width: 50px; height: 50px; object-fit: contain; }
-        #floating-timer { font-size: 32px; font-weight: bold; color: #9147ff; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
 
-        /* Main Card */
+        #floating-overlay img { 
+            height: 100%; /* Make image fill the container height */
+            width: auto;   /* Keep aspect ratio */
+            object-fit: contain; 
+        }
+
+        #floating-timer { 
+            font-size: 80px; 
+            line-height: 1; /* Removes extra spacing around the text */
+            font-weight: 900; 
+            color: #9147ff; 
+            text-shadow: 4px 4px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000;
+            display: flex;
+            align-items: center;
+        }
         .card { background: #18181b; border-radius: 12px; padding: 20px; max-width: 500px; margin: 50px auto; border: 1px solid #303032; position: relative; z-index: 10; }
         input, button, select { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
         .check-row { display: flex; align-items: center; gap: 10px; font-size: 0.85em; margin: 5px 0; cursor: pointer; }
@@ -36,15 +51,11 @@
         .success { color: #00ff7f; }
         .error { color: #ff4f4f; }
         .hidden { display: none !important; }
-
-        /* Progress hint at the bottom */
-        #secret-progress { position: fixed; bottom: 0; left: 0; height: 6px; background: #9147ff; width: 0%; z-index: 100; transition: width 0.1s linear; }
     </style>
 </head>
 <body>
 
 <div id="secret-progress"></div>
-<div id="secret-click-zone"></div>
 
 <div id="floating-overlay" class="hidden">
     <img src="peepo.png" alt="peepo">
@@ -84,7 +95,7 @@
         <div id="twStat" class="status">Twitch: Waiting...</div>
         <div id="timer-box" style="font-size: 2.5em; text-align: center; margin: 10px; color: #9147ff; font-weight: bold;">0s</div>
         <button id="testBtn">Manual Test</button>
-        <button onclick="localStorage.clear(); location.reload();" style="background:none; border:none; color: #666; font-size: 10px; cursor:pointer;">Reset Settings</button>
+        <button id="resetBtn" style="background:none; border:1px solid #444; color: #888; font-size: 11px; cursor:pointer; margin-top:10px;">Back to Setup</button>
         <div id="console-log">-- System Initialized --\n</div>
     </div>
 </div>
@@ -102,33 +113,27 @@
         }
     };
 
-    // --- SECRET CLICK LOGIC ---
+    // --- SECRET CLICK REVEAL ---
     let holdTimer;
-    const clickZone = getEl('secret-click-zone');
     const progress = getEl('secret-progress');
 
-    const startHold = () => {
+    document.addEventListener('mousedown', () => {
         progress.style.transition = 'width 5s linear';
         progress.style.width = '100%';
         holdTimer = setTimeout(() => {
             getEl('main-card').classList.remove('hidden');
             getEl('active-area').classList.remove('hidden');
-            getEl('showDebug').checked = true;
-            localStorage.setItem('showDebug', 'true');
-            log("Debug revealed via hold-click!");
         }, 5000);
-    };
+    });
 
-    const stopHold = () => {
+    document.addEventListener('mouseup', () => {
         clearTimeout(holdTimer);
         progress.style.transition = 'none';
         progress.style.width = '0%';
-    };
+    });
 
-    // Listen on the whole document for the hold
-    document.addEventListener('mousedown', startHold);
-    document.addEventListener('mouseup', stopHold);
-    document.addEventListener('mouseleave', stopHold);
+    // --- SYSTEM LOGIC ---
+    let obsWs, twSocket, timeLeft = 0, timerInterval = null;
 
     async function sha256(message) {
         const msgBuffer = new TextEncoder().encode(message);
@@ -136,14 +141,10 @@
         return btoa(String.fromCharCode.apply(null, new Uint8Array(hashBuffer)));
     }
 
-    getEl('tokenBtn').onclick = (e) => {
-        e.stopPropagation(); // Prevent trigger hold-click
-        window.open(`https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${CLIENT_ID}&redirect_uri=https://twitchapps.com/tokengen/&scope=${SCOPES}`, '_blank');
-    };
-
     const fields = ['twitchToken', 'obsPass', 'sceneName', 'sourceName', 'duration', 'rewardId'];
     const checks = ['showThenHide', 'stackTimer', 'showDebug'];
     
+    // Initial Load
     fields.forEach(f => {
         const val = localStorage.getItem(f);
         if (val !== null) getEl(f).value = val;
@@ -153,15 +154,36 @@
         if (val !== null) getEl(c).checked = (val === 'true');
     });
 
+    // Check Auto-Connect
     window.onload = () => {
-        if (getEl('twitchToken').value) {
+        if (localStorage.getItem('autoConnect') === 'true' && getEl('twitchToken').value) {
             startSystem();
         }
     };
 
+    getEl('tokenBtn').onclick = (e) => {
+        e.stopPropagation();
+        window.open(`https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${CLIENT_ID}&redirect_uri=https://twitchapps.com/tokengen/&scope=${SCOPES}`, '_blank');
+    };
+
     getEl('startBtn').onclick = (e) => {
         e.stopPropagation();
+        localStorage.setItem('autoConnect', 'true');
         startSystem();
+    };
+
+    // THE MODIFIED RESET ACTION
+    getEl('resetBtn').onclick = (e) => {
+        e.stopPropagation();
+        localStorage.setItem('autoConnect', 'false'); // Disable auto-connect
+        if(obsWs) obsWs.close();
+        if(twSocket) twSocket.close();
+        if(timerInterval) clearInterval(timerInterval);
+        
+        getEl('active-area').classList.add('hidden');
+        getEl('setup-area').classList.remove('hidden');
+        getEl('main-card').classList.remove('hidden');
+        log("Returned to setup. Auto-connect disabled.");
     };
 
     function startSystem() {
@@ -177,14 +199,11 @@
         initSystem();
     }
 
-    let obsWs, timeLeft = 0, timerInterval = null;
-
     async function initSystem() {
         const twitchToken = getEl('twitchToken').value;
         const obsPassword = getEl('obsPass').value;
 
         obsWs = new WebSocket('ws://127.0.0.1:4455');
-        
         obsWs.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
             if (msg.op === 0) {
@@ -196,7 +215,6 @@
             if (msg.op === 2) {
                 getEl('obsStat').innerText = "OBS: Connected";
                 getEl('obsStat').className = "status success";
-                log("OBS Connected.");
             }
         };
 
@@ -206,7 +224,7 @@
         const userData = await userRes.json();
         const userId = userData.data[0].id;
 
-        const twSocket = new WebSocket('wss://pubsub-edge.twitch.tv');
+        twSocket = new WebSocket('wss://pubsub-edge.twitch.tv');
         twSocket.onopen = () => {
             getEl('twStat').innerText = "Twitch: Connected";
             getEl('twStat').className = "status success";
@@ -229,7 +247,6 @@
                 }
             }
         };
-        setInterval(() => { if(twSocket.readyState === 1) twSocket.send(JSON.stringify({type:'PING'})); }, 240000);
     }
 
     function sendRawRequest(type, data, callback) {
@@ -265,13 +282,9 @@
     function runAction(scene, source, dur, modeShow, isStacking) {
         sendRawRequest("GetSceneItemList", { sceneName: scene }, (data) => {
             const item = data.sceneItems.find(i => i.sourceName.toLowerCase() === source.toLowerCase());
-            if (!item) { log(`Source "${source}" not found!`, true); return; }
+            if (!item) return;
 
-            sendRawRequest("SetSceneItemEnabled", { 
-                sceneName: scene, sceneItemId: item.sceneItemId, 
-                sceneItemEnabled: modeShow ? true : false 
-            });
-
+            sendRawRequest("SetSceneItemEnabled", { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: modeShow ? true : false });
             getEl('floating-overlay').classList.remove('hidden');
 
             if (timerInterval) {
@@ -285,11 +298,7 @@
                         clearInterval(timerInterval);
                         timerInterval = null;
                         getEl('floating-overlay').classList.add('hidden');
-                        updateTimerDisplay(0);
-                        sendRawRequest("SetSceneItemEnabled", { 
-                            sceneName: scene, sceneItemId: item.sceneItemId, 
-                            sceneItemEnabled: modeShow ? false : true 
-                        });
+                        sendRawRequest("SetSceneItemEnabled", { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: modeShow ? false : true });
                     }
                 }, 1000);
             }
@@ -302,10 +311,7 @@
         getEl('floating-timer').innerText = val + "s";
     }
 
-    getEl('testBtn').onclick = (e) => {
-        e.stopPropagation();
-        triggerEffect();
-    };
+    getEl('testBtn').onclick = (e) => { e.stopPropagation(); triggerEffect(); };
 </script>
 </body>
 </html>
