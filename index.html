@@ -2,41 +2,24 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OBS reward listen</title>
+    <title>Multi-User Reward Controller</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; margin: 0; overflow: hidden; user-select: none; }
         
         #secret-progress { position: fixed; bottom: 0; left: 0; height: 6px; background: #9147ff; width: 0%; z-index: 100; transition: width 0.1s linear; }
             
         #floating-overlay { 
-            position: fixed; 
-            top: 20px; 
-            left: 20px; 
-            display: flex; 
-            flex-direction: row; /* Keep them side-by-side */
-            align-items: center; /* Vertically center image and text */
-            justify-content: flex-start; /* Keep them to the left */
-            gap: 20px; 
-            height: 120px; /* Force a height for the container */
-            min-width: 300px;
-            z-index: 9999; 
-            pointer-events: none; 
+            position: fixed; top: 20px; left: 20px; 
+            display: flex; flex-direction: row; align-items: center; justify-content: flex-start; 
+            gap: 20px; height: 120px; min-width: 300px; z-index: 9999; pointer-events: none; 
         }
 
-        #floating-overlay img { 
-            height: 100%; /* Make image fill the container height */
-            width: auto;   /* Keep aspect ratio */
-            object-fit: contain; 
-        }
+        #floating-overlay img { height: 100%; width: auto; object-fit: contain; }
 
         #floating-timer { 
-            font-size: 80px; 
-            line-height: 1; /* Removes extra spacing around the text */
-            font-weight: 900; 
-            color: #9147ff; 
+            font-size: 80px; line-height: 1; font-weight: 900; color: #9147ff; 
             text-shadow: 4px 4px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000;
-            display: flex;
-            align-items: center;
+            display: flex; align-items: center;
         }
         .card { background: #18181b; border-radius: 12px; padding: 20px; max-width: 500px; margin: 50px auto; border: 1px solid #303032; position: relative; z-index: 10; }
         input, button, select { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
@@ -63,7 +46,7 @@
 </div>
 
 <div class="card" id="main-card">
-    <h3 style="margin:0 0 10px 0; color:#9147ff;"></h3>
+    <h3 id="user-display" style="margin:0 0 10px 0; color:#9147ff; text-align:center;">Reward Controller</h3>
     
     <div id="setup-area">
         <button id="tokenBtn">1. Get Twitch Token</button>
@@ -113,7 +96,6 @@
         }
     };
 
-    // --- SECRET CLICK REVEAL ---
     let holdTimer;
     const progress = getEl('secret-progress');
 
@@ -132,7 +114,6 @@
         progress.style.width = '0%';
     });
 
-    // --- SYSTEM LOGIC ---
     let obsWs, twSocket, timeLeft = 0, timerInterval = null;
 
     async function sha256(message) {
@@ -144,7 +125,6 @@
     const fields = ['twitchToken', 'obsPass', 'sceneName', 'sourceName', 'duration', 'rewardId'];
     const checks = ['showThenHide', 'stackTimer', 'showDebug'];
     
-    // Initial Load
     fields.forEach(f => {
         const val = localStorage.getItem(f);
         if (val !== null) getEl(f).value = val;
@@ -154,7 +134,6 @@
         if (val !== null) getEl(c).checked = (val === 'true');
     });
 
-    // Check Auto-Connect
     window.onload = () => {
         if (localStorage.getItem('autoConnect') === 'true' && getEl('twitchToken').value) {
             startSystem();
@@ -172,24 +151,21 @@
         startSystem();
     };
 
-    // THE MODIFIED RESET ACTION
     getEl('resetBtn').onclick = (e) => {
         e.stopPropagation();
-        localStorage.setItem('autoConnect', 'false'); // Disable auto-connect
+        localStorage.setItem('autoConnect', 'false');
         if(obsWs) obsWs.close();
         if(twSocket) twSocket.close();
         if(timerInterval) clearInterval(timerInterval);
-        
         getEl('active-area').classList.add('hidden');
         getEl('setup-area').classList.remove('hidden');
         getEl('main-card').classList.remove('hidden');
-        log("Returned to setup. Auto-connect disabled.");
+        getEl('user-display').innerText = "Reward Controller";
     };
 
     function startSystem() {
         fields.forEach(f => localStorage.setItem(f, getEl(f).value));
         checks.forEach(c => localStorage.setItem(c, getEl(c).checked));
-        
         getEl('setup-area').classList.add('hidden');
         if (getEl('showDebug').checked) {
             getEl('active-area').classList.remove('hidden');
@@ -203,6 +179,7 @@
         const twitchToken = getEl('twitchToken').value;
         const obsPassword = getEl('obsPass').value;
 
+        // Connect OBS
         obsWs = new WebSocket('ws://127.0.0.1:4455');
         obsWs.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
@@ -218,35 +195,54 @@
             }
         };
 
-        const userRes = await fetch('https://api.twitch.tv/helix/users?login=ZiedYT', {
-            headers: { 'Authorization': `Bearer ${twitchToken}`, 'Client-Id': CLIENT_ID }
-        });
-        const userData = await userRes.json();
-        const userId = userData.data[0].id;
+        // DYNAMIC USER FETCH
+        try {
+            const userRes = await fetch('https://api.twitch.tv/helix/users', {
+                headers: { 'Authorization': `Bearer ${twitchToken}`, 'Client-Id': CLIENT_ID }
+            });
+            const userData = await userRes.json();
+            const user = userData.data[0];
+            const userId = user.id;
+            const currentUsername = user.login.toLowerCase();
+            
+            getEl('user-display').innerText = `Hello, ${user.display_name}`;
+            log(`Logged in as ${user.display_name} (${userId})`);
 
-        twSocket = new WebSocket('wss://pubsub-edge.twitch.tv');
-        twSocket.onopen = () => {
-            getEl('twStat').innerText = "Twitch: Connected";
-            getEl('twStat').className = "status success";
-            twSocket.send(JSON.stringify({
-                type: 'LISTEN',
-                data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: twitchToken }
-            }));
-        };
+            twSocket = new WebSocket('wss://pubsub-edge.twitch.tv');
+            twSocket.onopen = () => {
+                getEl('twStat').innerText = "Twitch: Connected";
+                getEl('twStat').className = "status success";
+                twSocket.send(JSON.stringify({
+                    type: 'LISTEN',
+                    data: { topics: [`channel-points-channel-v1.${userId}`, `chat_moderator_actions.${userId}.${userId}`], auth_token: twitchToken }
+                }));
+            };
 
-        twSocket.onmessage = (e) => {
-            const msg = JSON.parse(e.data);
-            if (msg.type === 'MESSAGE') {
-                const inner = JSON.parse(msg.data.message);
-                const topic = msg.data.topic;
-                if (topic.includes('channel-points')) {
-                    const rId = getEl('rewardId').value;
-                    if (!rId || inner.data.redemption.reward.id === rId) triggerEffect();
-                } else if (topic.includes('chat_moderator_actions')) {
-                    if (inner.data.moderation_action === 'timeout' && inner.data.created_by_user_id === userId) triggerEffect();
+            twSocket.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'MESSAGE') {
+                    const inner = JSON.parse(msg.data.message);
+                    const topic = msg.data.topic;
+
+                    // Trigger 1: Channel Points (For Everyone)
+                    if (topic.includes('channel-points')) {
+                        const rId = getEl('rewardId').value;
+                        if (!rId || inner.data.redemption.reward.id === rId) triggerEffect();
+                    } 
+                    
+                    // Trigger 2: Timeouts (ONLY for ZiedYT)
+                    else if (topic.includes('chat_moderator_actions') && currentUsername === 'ziedyt') {
+                        if (inner.data.moderation_action === 'timeout') triggerEffect();
+                    }
                 }
-            }
-        };
+            };
+            
+            // Keep-alive PING
+            setInterval(() => { if(twSocket.readyState === 1) twSocket.send(JSON.stringify({type:'PING'})); }, 240000);
+
+        } catch (err) {
+            log("Twitch User Fetch Failed: Check Token", true);
+        }
     }
 
     function sendRawRequest(type, data, callback) {
@@ -282,7 +278,7 @@
     function runAction(scene, source, dur, modeShow, isStacking) {
         sendRawRequest("GetSceneItemList", { sceneName: scene }, (data) => {
             const item = data.sceneItems.find(i => i.sourceName.toLowerCase() === source.toLowerCase());
-            if (!item) return;
+            if (!item) { log(`Source ${source} not found in ${scene}`, true); return; }
 
             sendRawRequest("SetSceneItemEnabled", { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: modeShow ? true : false });
             getEl('floating-overlay').classList.remove('hidden');
