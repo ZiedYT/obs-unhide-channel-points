@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Twitch OBS Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@5.0.5/dist/obs-websocket.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0e0e10; color: #efeff1; padding: 20px; line-height: 1.6; }
+        .card { background: #18181b; border-radius: 8px; padding: 20px; max-width: 400px; margin: auto; border: 1px solid #303032; }
+        input, button { width: 100%; padding: 10px; margin: 8px 0; border-radius: 4px; border: 1px solid #303032; background: #0e0e10; color: white; box-sizing: border-box; }
+        button { background: #9147ff; font-weight: bold; cursor: pointer; border: none; }
+        button:hover { background: #772ce8; }
+        .status { font-size: 0.8em; margin-top: 10px; padding: 5px; border-radius: 4px; }
+        .connected { color: #00ff7f; }
+        .disconnected { color: #ff4f4f; }
+        #timer-box { font-size: 2em; text-align: center; margin: 20px 0; color: #9147ff; font-weight: bold; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div id="setup-ui">
+            <h3>OBS & Twitch Setup</h3>
+            <input type="password" id="obsPass" placeholder="OBS WebSocket Password">
+            <input type="text" id="sceneName" placeholder="Scene Name (e.g. Gameplay)">
+            <input type="text" id="sourceName" placeholder="Source Name (e.g. MemePic)">
+            <input type="text" id="rewardId" placeholder="Reward ID (optional)">
+            <input type="number" id="duration" value="5" placeholder="Duration (seconds)">
+            <label style="font-size: 0.8em;"><input type="checkbox" id="stackTime"> Stack Duration?</label>
+            <button id="authBtn">Connect to Twitch</button>
+        </div>
+
+        <div id="active-ui" class="hidden">
+            <div id="timer-box">0s</div>
+            <div id="obsStatus" class="status disconnected">OBS: Offline</div>
+            <div id="twitchStatus" class="status disconnected">Twitch: Offline</div>
+            <button id="testBtn" style="background: #3a3a3a;">Manual Test Trigger</button>
+            <button onclick="localStorage.clear(); location.reload();" style="background: transparent; color: #666; font-size: 0.7em;">Reset All Settings</button>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
