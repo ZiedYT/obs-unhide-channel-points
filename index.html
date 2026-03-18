@@ -54,7 +54,7 @@
         <input type="password" id="obsPass" placeholder="OBS WebSocket Password">
         <input type="text" id="sceneName" placeholder="OBS Scene Name (Optional)">
         <input type="text" id="sourceName" placeholder="OBS Source Name">
-        <input type="text" id="rewardId" placeholder="Twitch Reward ID (Optional)">
+        <input type="text" id="rewardId" placeholder="Twitch Reward Name (Exact Title)">
         <input type="number" id="duration" value="5">
         
         <div class="check-row">
@@ -179,7 +179,6 @@
         const twitchToken = getEl('twitchToken').value;
         const obsPassword = getEl('obsPass').value;
 
-        // Connect OBS
         obsWs = new WebSocket('ws://127.0.0.1:4455');
         obsWs.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
@@ -195,7 +194,6 @@
             }
         };
 
-        // DYNAMIC USER FETCH
         try {
             const userRes = await fetch('https://api.twitch.tv/helix/users', {
                 headers: { 'Authorization': `Bearer ${twitchToken}`, 'Client-Id': CLIENT_ID }
@@ -206,7 +204,7 @@
             const currentUsername = user.login.toLowerCase();
             
             getEl('user-display').innerText = `Hello, ${user.display_name}`;
-            log(`Logged in as ${user.display_name} (${userId})`);
+            log(`Logged in as ${user.display_name}`);
 
             twSocket = new WebSocket('wss://pubsub-edge.twitch.tv');
             twSocket.onopen = () => {
@@ -224,24 +222,27 @@
                     const inner = JSON.parse(msg.data.message);
                     const topic = msg.data.topic;
 
-                    // Trigger 1: Channel Points (For Everyone)
                     if (topic.includes('channel-points')) {
-                        const rId = getEl('rewardId').value;
-                        if (!rId || inner.data.redemption.reward.id === rId) triggerEffect();
+                        const rewardNameReceived = inner.data.redemption.reward.title;
+                        const targetName = getEl('rewardId').value;
+                        
+                        log(`Redemption: "${rewardNameReceived}"`);
+                        
+                        // Compare by Reward Name instead of ID
+                        if (!targetName || rewardNameReceived.toLowerCase() === targetName.toLowerCase()) {
+                            triggerEffect();
+                        }
                     } 
-                    
-                    // Trigger 2: Timeouts (ONLY for ZiedYT)
                     else if (topic.includes('chat_moderator_actions') && currentUsername === 'ziedyt') {
                         if (inner.data.moderation_action === 'timeout') triggerEffect();
                     }
                 }
             };
             
-            // Keep-alive PING
             setInterval(() => { if(twSocket.readyState === 1) twSocket.send(JSON.stringify({type:'PING'})); }, 240000);
 
         } catch (err) {
-            log("Twitch User Fetch Failed: Check Token", true);
+            log("Twitch Error: Check Token", true);
         }
     }
 
@@ -278,7 +279,7 @@
     function runAction(scene, source, dur, modeShow, isStacking) {
         sendRawRequest("GetSceneItemList", { sceneName: scene }, (data) => {
             const item = data.sceneItems.find(i => i.sourceName.toLowerCase() === source.toLowerCase());
-            if (!item) { log(`Source ${source} not found in ${scene}`, true); return; }
+            if (!item) { log(`Source ${source} not found`, true); return; }
 
             sendRawRequest("SetSceneItemEnabled", { sceneName: scene, sceneItemId: item.sceneItemId, sceneItemEnabled: modeShow ? true : false });
             getEl('floating-overlay').classList.remove('hidden');
