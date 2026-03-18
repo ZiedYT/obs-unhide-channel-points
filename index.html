@@ -228,8 +228,12 @@
                         
                         log(`Redemption: "${rewardNameReceived}"`);
                         
-                        // Compare by Reward Name instead of ID
-                        if (!targetName || rewardNameReceived.toLowerCase() === targetName.toLowerCase()) {
+                        // Normalize both strings: Lowercase + Strip all spaces
+                        const cleanReceived = rewardNameReceived.toLowerCase().replace(/\s+/g, '');
+                        const cleanTarget = targetName.toLowerCase().replace(/\s+/g, '');
+                        
+                        // Compare
+                        if (!targetName || cleanReceived === cleanTarget) {
                             triggerEffect();
                         }
                     } 
