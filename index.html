@@ -221,7 +221,7 @@
                 if (msg.type === 'MESSAGE') {
                     const inner = JSON.parse(msg.data.message);
                     const topic = msg.data.topic;
-
+                    console.log(msg)
                     if (topic.includes('channel-points')) {
                         const rewardNameReceived = inner.data.redemption.reward.title;
                         const targetName = getEl('rewardId').value;
